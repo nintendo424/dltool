@@ -3,6 +3,8 @@
 ![Sample](sample.png)
 
 ## Info
+${{\color{red}\Huge{\textsf{Updated to use the HTTP-server of Myrient, as their FTP-server is shutting down on 26th of May, 2024.}}}}\$
+
 First of all, <b>huge thanks</b> to the people behind Myrient for the fantastic service they're providing!
 
 With this tool it is not necessary to download terabytes worth of complete ROMsets, just to delete most of it afterwards. Instead, with this tool you can download only the ROMs in your filtered DAT-file from Myrient.
@@ -12,7 +14,7 @@ Resuming downloads after an interruption should work, however this functionality
 I've also tested this only on Linux, but I suppose it should work on Windows also.
 
 ## Requirements
-The script uses external progressbar2 -library, which can be installed using:
+The script uses external Beautiful Soup, Progress Bar and Requests -libraries, which can be installed using:
 ```
 pip3 install -r requirements.txt
 ```

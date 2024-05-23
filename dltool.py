@@ -5,15 +5,16 @@ import signal
 import argparse
 import datetime
 import platform
+import requests
 import textwrap
 import xml.etree.ElementTree as ET
-from ftplib import FTP
+from bs4 import BeautifulSoup
 from progressbar import ProgressBar, Bar, ETA, FileTransferSpeed, Percentage, DataSize
 
 #Define constants
-#Myrient FTP-server address
-MYRIENTFTPADDR = 'ftp.myrient.erista.me'
-#Catalog URLs, to find out the catalog in use from DAT
+#Myrient HTTP-server addresses
+MYRIENTHTTPADDR = 'https://myrient.erista.me/files/'
+#Catalog URLs, to parse out the catalog in use from DAT
 CATALOGURLS = {
     'https://www.no-intro.org': 'No-Intro',
     'http://redump.org/': 'Redump'
@@ -22,6 +23,13 @@ CATALOGURLS = {
 DATPOSTFIXES = [
     ' (Retool)'
 ]
+#Chunk sizes to download
+CHUNKSIZE = 8192
+#Headers to use in HTTP-requests
+REQHEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'
+}
 
 #Print output function
 def logger(str, color=None, rewrite=False):
@@ -44,7 +52,7 @@ def inputter(str, color=None):
 
 #Scale file size
 def scale1024(val):
-    prefixes=['', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB']
+    prefixes=['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB']
     if val <= 0:
         power = 0
     else:
@@ -55,7 +63,7 @@ def scale1024(val):
 
 #Exit handler function
 def exithandler(signum, frame):
-    logger('Exiting script!', 'red', True)
+    logger('Exiting script!', 'red')
     exit()
 signal.signal(signal.SIGINT, exithandler)
 
@@ -79,14 +87,13 @@ requiredargs.add_argument('-o', dest='out', metavar='/data/roms', help='Output p
 optionalargs = parser.add_argument_group('\033[96mOptional arguments\033[00m')
 optionalargs.add_argument('-c', dest='catalog', action='store_true', help='Choose catalog manually, even if automatically found')
 optionalargs.add_argument('-s', dest='system', action='store_true', help='Choose system collection manually, even if automatically found')
-optionalargs.add_argument('-l', dest='list', action='store_true', help='List only ROMs that are not found in FTP-server (if any)')
+optionalargs.add_argument('-l', dest='list', action='store_true', help='List only ROMs that are not found in server (if any)')
 optionalargs.add_argument('-h', '--help', dest='help', action='help', help='Show this help message')
 args = parser.parse_args()
 
 #Init variables
 catalog = None
 collection = None
-totaldlsize = 0
 wantedroms = []
 wantedfiles = []
 missingroms = []
@@ -132,93 +139,104 @@ for datchild in datroot:
         if filename not in wantedroms:
             wantedroms.append(filename)
 
-#Connect to Myrient FTP
-logger(f'Connecting to Myrient FTP-server...', 'green')
-ftp = FTP(MYRIENTFTPADDR)
-ftp.login()
+#Get HTTP base and select wanted catalog
+catalogurl = None
+resp = requests.get(MYRIENTHTTPADDR, headers=REQHEADERS).text
+resp = BeautifulSoup(resp, 'html.parser')
+maindir = resp.find('table', id='list').tbody.find_all('tr')
+for dir in maindir[1:]:
+    cell = dir.find('td')
+    if catalog in cell.a['title']:
+        catalogurl = cell.a['href']
 
-#Get main directory and select wanted catalog
-maindir = ftp.nlst()
-if not catalog in maindir or args.catalog:
+if not catalogurl or args.catalog:
     logger('Catalog for DAT not automatically found, please select from the following:', 'yellow')
     dirnbr = 1
-    for dir in maindir:
-        logger(f'{str(dirnbr).ljust(2)}: {dir}', 'yellow')
+    catalogtemp = {}
+    for dir in maindir[1:]:
+        cell = dir.find('td')
+        logger(f'{str(dirnbr).ljust(2)}: {cell.a["title"]}', 'yellow')
+        catalogtemp[dirnbr] = {'name': cell.a['title'], 'url': cell.a['href']}
         dirnbr += 1
-    sel = inputter('Input selected catalog number: ', 'cyan')
-    try:
-        sel = int(sel)
-        if sel > 0 and sel < dirnbr:
-            catalog = maindir[sel-1]
-        else:
-            logger('Input number out of range!', 'red')
-            exit()
-    except:
-        logger('Given input is not a number!', 'red')
-        exit()
+    while True:
+        sel = inputter('Input selected catalog number: ', 'cyan')
+        try:
+            sel = int(sel)
+            if sel > 0 and sel < dirnbr:
+                catalog = catalogtemp[sel]['name']
+                catalogurl = catalogtemp[sel]['url']
+                break
+            else:
+                logger('Input number out of range!', 'red')
+        except:
+            logger('Invalid number!', 'red')
 
 #Get catalog directory and select wanted collection
-ftp.cwd(catalog)
-contentdir = ftp.nlst()
-for content in contentdir:
-    if content.startswith(system):
-        foundcollections.append(content)
+collectionurl = None
+resp = requests.get(f'{MYRIENTHTTPADDR}{catalogurl}', headers=REQHEADERS).text
+resp = BeautifulSoup(resp, 'html.parser')
+contentdir = resp.find('table', id='list').tbody.find_all('tr')
+for dir in contentdir[1:]:
+    cell = dir.find('td')
+    if cell.a['title'].startswith(system):
+        foundcollections.append({'name': cell.a['title'], 'url': cell.a['href']})
 if len(foundcollections) == 1:
-    collection = foundcollections[0]
+    collection = foundcollections[0]['name']
+    collectionurl = foundcollections[0]['url']
 if not collection or args.system:
     logger('Collection for DAT not automatically found, please select from the following:', 'yellow')
     dirnbr = 1
     if len(foundcollections) > 1 and not args.system:
         for foundcollection in foundcollections:
-            logger(f'{str(dirnbr).ljust(2)}: {foundcollection}', 'yellow')
+            logger(f'{str(dirnbr).ljust(2)}: {foundcollection["name"]}', 'yellow')
             dirnbr += 1
     else:
-        for dir in contentdir:
-            logger(f'{str(dirnbr).ljust(2)}: {dir}', 'yellow')
+        collectiontemp = {}
+        for dir in contentdir[1:]:
+            cell = dir.find('td')
+            logger(f'{str(dirnbr).ljust(2)}: {cell.a["title"]}', 'yellow')
+            collectiontemp[dirnbr] = {'name': cell.a['title'], 'url': cell.a['href']}
             dirnbr += 1
-    sel = inputter('Input selected collection number: ', 'cyan')
-    try:
-        sel = int(sel)
-        if sel > 0 and sel < dirnbr:
-            if len(foundcollections) > 1:
-                collection = foundcollections[sel-1]
+    while True:
+        sel = inputter('Input selected collection number: ', 'cyan')
+        try:
+            sel = int(sel)
+            if sel > 0 and sel < dirnbr:
+                if len(foundcollections) > 1 and not args.system:
+                    collection = foundcollections[sel-1]['name']
+                    collectionurl = foundcollections[sel-1]['url']
+                else:
+                    collection = collectiontemp[sel]['name']
+                    collectionurl = collectiontemp[sel]['url']
+                break
             else:
-                collection = contentdir[sel-1]
-        else:
-            logger('Input number out of range!', 'red')
-            exit()
-    except:
-        logger('Given input is not a number!', 'red')
-        exit()
-
+                logger('Input number out of range!', 'red')
+        except:
+            logger('Invalid number!', 'red')
+    
 #Get collection directory contents and list contents to available ROMs
-ftp.cwd(collection)
-ftp.dir(collectiondir.append)
-for line in collectiondir:
-    file = re.findall('([0-9]{1,})[\s]{1,}[A-Za-z]{3,4}[\s]{1,}[0-9]{1,2}[\s]{1,}[0-9|:]{4,5}[\s]{1,}(.*?)\Z', line[28:].strip())
-    filesize = file[0][0]
-    filename = file[0][1]
+resp = requests.get(f'{MYRIENTHTTPADDR}{catalogurl}{collectionurl}', headers=REQHEADERS).text
+resp = BeautifulSoup(resp, 'html.parser')
+collectiondir = resp.find('table', id='list').tbody.find_all('tr')
+for rom in collectiondir[1:]:
+    cell = rom.find('a')
+    filename = cell['title']
     romname = re.sub(r'\.[(a-zA-Z0-9)]{1,3}\Z', '', filename)
-    availableroms[romname] = {'name': romname, 'file': filename, 'size': filesize}
+    url = f'{MYRIENTHTTPADDR}{catalogurl}{collectionurl}{cell["href"]}'
+    availableroms[romname] = {'name': romname, 'file': filename, 'url': url}
 
 #Compare wanted ROMs and contents of the collection, parsing out only wanted files
 for wantedrom in wantedroms:
     if wantedrom in availableroms:
-        totaldlsize += int(availableroms[wantedrom]['size'])
         wantedfiles.append(availableroms[wantedrom])
     else:
         missingroms.append(wantedrom)
 
 #Print out information about wanted/found/missing ROMs
-wantedamt = len(wantedroms)
-foundamt = len(wantedfiles)
-totaldlsize, totaldlunit = scale1024(totaldlsize)
-logger(f'Amount of wanted ROMs in DAT-file   : {wantedamt}', 'green')
-logger(f'Amount of found ROMs at FTP-server  : {foundamt}', 'green')
-logger(f'Amount of total data to download    : {round(totaldlsize, 2)} {totaldlunit}', 'green')
+logger(f'Amount of wanted ROMs in DAT-file   : {len(wantedroms)}', 'green')
+logger(f'Amount of found ROMs at server      : {len(wantedfiles)}', 'green')
 if missingroms:
-    missingamt = len(missingroms)
-    logger(f'Amount of missing ROMs at FTP-server: {missingamt}', 'yellow')
+    logger(f'Amount of missing ROMs at server    : {len(missingroms)}', 'yellow')
 
 #Download wanted files
 if not args.list:
@@ -227,52 +245,56 @@ if not args.list:
         dlcounter += 1
         resumedl = False
         proceeddl = True
-
+        
         if platform.system() == 'Linux':
             localpath = f'{args.out}/{wantedfile["file"]}'
         elif platform.system() == 'Windows':
             localpath = f'{args.out}\{wantedfile["file"]}'
         
-        remotefilesize = int(wantedfile['size'])
+        resp = requests.get(wantedfile['url'], headers=REQHEADERS, stream=True)
+        remotefilesize = int(resp.headers.get('content-length'))
+        
         if os.path.isfile(localpath):
             localfilesize = int(os.path.getsize(localpath))
             if localfilesize != remotefilesize:
                 resumedl = True
             else:
                 proceeddl = False
-
+        
         if proceeddl:
             file = open(localpath, 'ab')
-
+            
             size, unit = scale1024(remotefilesize)
-            pbar = ProgressBar(widgets=['\033[96m', Percentage(), ' | ', DataSize(), f' / {round(size, 1)} {unit}', ' ', Bar(marker='#'), ' ', ETA(), ' | ', FileTransferSpeed(), '\033[00m'], max_value=int(wantedfile['size']), redirect_stdout=True)
+            pbar = ProgressBar(widgets=['\033[96m', Percentage(), ' | ', DataSize(), f' / {round(size, 1)} {unit}', ' ', Bar(marker='#'), ' ', ETA(), ' | ', FileTransferSpeed(), '\033[00m'], max_value=remotefilesize, redirect_stdout=True)
             pbar.start()
-
-            def writefile(data):
-                global pbar
-                file.write(data)
-                pbar += len(data)
             
             if resumedl:
-                logger(f'Resuming    {str(dlcounter).zfill(len(str(foundamt)))}/{foundamt}: {wantedfile["name"]}', 'cyan')
+                logger(f'Resuming    {str(dlcounter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'cyan')
                 pbar += localfilesize
-                ftp.retrbinary(f'RETR {wantedfile["file"]}', writefile, rest=localfilesize)
+                headers = REQHEADERS
+                headers.update({'Range': f'bytes={localfilesize}-'})
+                resp = requests.get(wantedfile['url'], headers=headers, stream=True)
+                for data in resp.iter_content(chunk_size=CHUNKSIZE):
+                    file.write(data)
+                    pbar += len(data)
             else:
-                logger(f'Downloading {str(dlcounter).zfill(len(str(foundamt)))}/{foundamt}: {wantedfile["name"]}', 'cyan')
-                ftp.retrbinary(f'RETR {wantedfile["file"]}', writefile)
-
+                logger(f'Downloading {str(dlcounter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'cyan')
+                for data in resp.iter_content(chunk_size=CHUNKSIZE):
+                    file.write(data)
+                    pbar += len(data)
+            
             file.close()
             pbar.finish()
             print('\033[1A', end='\x1b[2K')
-            logger(f'Downloaded  {str(dlcounter).zfill(len(str(foundamt)))}/{foundamt}: {wantedfile["name"]}', 'green', True)
+            logger(f'Downloaded  {str(dlcounter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'green', True)
         else:
-            logger(f'Already DLd {str(dlcounter).zfill(len(str(foundamt)))}/{foundamt}: {wantedfile["name"]}', 'green')
+            logger(f'Already DLd {str(dlcounter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'green')
     logger('Downloading complete!', 'green', False)
 
 #Output missing ROMs, if any
 if missingroms:
-    logger(f'Following {missingamt} ROMs in DAT not automatically found from FTP-server, grab these manually:', 'red')
+    logger(f'Following {len(missingroms)} ROMs in DAT not automatically found from server, grab these manually:', 'red')
     for missingrom in missingroms:
         logger(missingrom, 'yellow')
 else:
-    logger('All ROMs in DAT found from FTP-server!', 'green')
+    logger('All ROMs in DAT found from server!', 'green')
