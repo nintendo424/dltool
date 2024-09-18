@@ -1,3 +1,4 @@
+import multiprocessing
 import os
 import re
 import math
@@ -8,6 +9,7 @@ import platform
 import requests
 import textwrap
 import xml.etree.ElementTree as ET
+from multiprocessing import Pool, Value
 from bs4 import BeautifulSoup
 from progressbar import ProgressBar, Bar, ETA, FileTransferSpeed, Percentage, DataSize
 
@@ -89,6 +91,7 @@ optionalargs.add_argument('-c', dest='catalog', action='store_true', help='Choos
 optionalargs.add_argument('-s', dest='system', action='store_true', help='Choose system collection manually, even if automatically found')
 optionalargs.add_argument('-l', dest='list', action='store_true', help='List only ROMs that are not found in server (if any)')
 optionalargs.add_argument('-h', '--help', dest='help', action='help', help='Show this help message')
+optionalargs.add_argument('-t', '--threads', dest='threads', default=multiprocessing.cpu_count(), help='Thread count', type=int)
 args = parser.parse_args()
 
 #Init variables
@@ -238,57 +241,68 @@ logger(f'Amount of found ROMs at server      : {len(wantedfiles)}', 'green')
 if missingroms:
     logger(f'Amount of missing ROMs at server    : {len(missingroms)}', 'yellow')
 
+dlcounter = Value('i', 1)
+
+def file_download(wantedfile):
+    resumedl = False
+    proceeddl = True
+
+    global dlcounter
+    counter = dlcounter.value
+    with dlcounter.get_lock():
+        dlcounter.value += 1
+
+    if platform.system() == 'Linux':
+        localpath = f'{args.out}/{wantedfile["file"]}'
+    elif platform.system() == 'Windows':
+        localpath = f'{args.out}\\{wantedfile["file"]}'
+
+    resp = requests.get(wantedfile['url'], headers=REQHEADERS, stream=True)
+    remotefilesize = int(resp.headers.get('content-length'))
+
+    if os.path.isfile(localpath):
+        localfilesize = int(os.path.getsize(localpath))
+        if localfilesize != remotefilesize:
+            resumedl = True
+        else:
+            proceeddl = False
+
+    if proceeddl:
+        file = open(localpath, 'ab')
+
+        size, unit = scale1024(remotefilesize)
+        pbar = ProgressBar(widgets=['\033[96m', Percentage(), ' | ', DataSize(), f' / {round(size, 1)} {unit}', ' ', Bar(marker='#'), ' ', ETA(), ' | ', FileTransferSpeed(), '\033[00m'], max_value=remotefilesize, redirect_stdout=True)
+        pbar.start()
+
+        if resumedl:
+            logger(f'Resuming    {str(dlcounter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'cyan')
+            pbar += localfilesize
+            headers = REQHEADERS
+            headers.update({'Range': f'bytes={localfilesize}-'})
+            resp = requests.get(wantedfile['url'], headers=headers, stream=True)
+            for data in resp.iter_content(chunk_size=CHUNKSIZE):
+                file.write(data)
+                pbar += len(data)
+        else:
+            logger(f'Downloading {str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'cyan')
+            for data in resp.iter_content(chunk_size=CHUNKSIZE):
+                file.write(data)
+                pbar += len(data)
+
+        file.close()
+        pbar.finish()
+        print('\033[1A', end='\x1b[2K')
+        logger(f'Downloaded  {str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'green', True)
+    else:
+        logger(f'Already DLd {str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'green')
+
+pool = multiprocessing.Pool(args.threads)
+
 #Download wanted files
 if not args.list:
-    dlcounter = 0
-    for wantedfile in wantedfiles:
-        dlcounter += 1
-        resumedl = False
-        proceeddl = True
-        
-        if platform.system() == 'Linux':
-            localpath = f'{args.out}/{wantedfile["file"]}'
-        elif platform.system() == 'Windows':
-            localpath = f'{args.out}\{wantedfile["file"]}'
-        
-        resp = requests.get(wantedfile['url'], headers=REQHEADERS, stream=True)
-        remotefilesize = int(resp.headers.get('content-length'))
-        
-        if os.path.isfile(localpath):
-            localfilesize = int(os.path.getsize(localpath))
-            if localfilesize != remotefilesize:
-                resumedl = True
-            else:
-                proceeddl = False
-        
-        if proceeddl:
-            file = open(localpath, 'ab')
-            
-            size, unit = scale1024(remotefilesize)
-            pbar = ProgressBar(widgets=['\033[96m', Percentage(), ' | ', DataSize(), f' / {round(size, 1)} {unit}', ' ', Bar(marker='#'), ' ', ETA(), ' | ', FileTransferSpeed(), '\033[00m'], max_value=remotefilesize, redirect_stdout=True)
-            pbar.start()
-            
-            if resumedl:
-                logger(f'Resuming    {str(dlcounter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'cyan')
-                pbar += localfilesize
-                headers = REQHEADERS
-                headers.update({'Range': f'bytes={localfilesize}-'})
-                resp = requests.get(wantedfile['url'], headers=headers, stream=True)
-                for data in resp.iter_content(chunk_size=CHUNKSIZE):
-                    file.write(data)
-                    pbar += len(data)
-            else:
-                logger(f'Downloading {str(dlcounter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'cyan')
-                for data in resp.iter_content(chunk_size=CHUNKSIZE):
-                    file.write(data)
-                    pbar += len(data)
-            
-            file.close()
-            pbar.finish()
-            print('\033[1A', end='\x1b[2K')
-            logger(f'Downloaded  {str(dlcounter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'green', True)
-        else:
-            logger(f'Already DLd {str(dlcounter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'green')
+    pool.map(file_download, wantedfiles)
+    pool.close()
+    pool.join()
     logger('Downloading complete!', 'green', False)
 
 #Output missing ROMs, if any

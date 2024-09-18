@@ -1,0 +1,13 @@
+name: dltool
+
+services:
+  dltool:
+    build: .
+    image: nintendo424/dltool:latest
+    volumes:
+      - ./inputDats:/app/inputDats
+      - outputFiles:/app/outputFiles
+    tty: true
+
+volumes:
+  outputFiles:
