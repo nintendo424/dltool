@@ -259,7 +259,7 @@ def file_download(wantedfile):
             proceeddl = False
 
     if proceeddl:
-        with open(localpath, 'ab') as file:
+        with open(localpath, 'wb') as file:
             with tqdm(total=remotefilesize, unit='B', unit_scale=True, desc=f'{str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}') as pbar:
                 for data in filedownload.iter_content(chunk_size=args.chunksize):
                     file.write(data)
