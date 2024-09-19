@@ -77,7 +77,9 @@ optionalargs.add_argument('-c', dest='catalog', action='store_true', help='Choos
 optionalargs.add_argument('-s', dest='system', action='store_true', help='Choose system collection manually, even if automatically found')
 optionalargs.add_argument('-l', dest='list', action='store_true', help='List only ROMs that are not found in server (if any)')
 optionalargs.add_argument('-h', '--help', dest='help', action='help', help='Show this help message')
+optionalargs.add_argument('--chunk-size', dest='chunksize', default=8192, help='Chunk size in bytes', type=int)
 optionalargs.add_argument('-t', '--threads', dest='threads', default=multiprocessing.cpu_count(), help='Thread count', type=int)
+
 args = parser.parse_args()
 
 #Init variables
@@ -259,7 +261,7 @@ def file_download(wantedfile):
     if proceeddl:
         with open(localpath, 'ab') as file:
             with tqdm(total=remotefilesize, unit='B', unit_scale=True, desc=f'{str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}') as pbar:
-                for data in filedownload.iter_content(chunk_size=None):
+                for data in filedownload.iter_content(chunk_size=args.chunksize):
                     file.write(data)
                     pbar.update(len(data))
 
