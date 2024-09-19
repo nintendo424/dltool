@@ -247,8 +247,11 @@ def file_download(wantedfile):
     elif platform.system() == 'Windows':
         localpath = f'{args.out}\\{wantedfile["file"]}'
 
-    resp = requests.get(wantedfile['url'], headers=REQHEADERS, stream=True)
-    remotefilesize = int(resp.headers.get('content-length'), 0)
+    content_length = None
+    while content_length is None:
+        resp = requests.get(wantedfile['url'], headers=REQHEADERS, stream=True)
+        content_length = resp.headers.get('content-length')
+    remotefilesize = int(content_length, 0)
 
     if os.path.isfile(localpath):
         localfilesize = int(os.path.getsize(localpath))
