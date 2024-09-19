@@ -1,7 +1,6 @@
 import multiprocessing
 import os
 import re
-import math
 import signal
 import argparse
 import datetime
@@ -235,7 +234,6 @@ dlcounter = Value('i', 1)
 def file_download(wantedfile):
     global dlcounter
 
-    resumedl = False
     proceeddl = True
 
     counter = dlcounter.value
@@ -247,41 +245,35 @@ def file_download(wantedfile):
     elif platform.system() == 'Windows':
         localpath = f'{args.out}\\{wantedfile["file"]}'
 
-    content_length = None
-    while content_length is None:
-        resp = requests.get(wantedfile['url'], headers=REQHEADERS, stream=True)
-        content_length = resp.headers.get('content-length')
-    remotefilesize = int(content_length, 0)
+    try:
+        content_length = None
+        while content_length is None:
+            filedownload = requests.get(wantedfile['url'], headers=REQHEADERS, stream=True, timeout=10)
+            content_length = filedownload.headers.get('content-length')
+        remotefilesize = int(content_length, 0)
 
-    if os.path.isfile(localpath):
-        localfilesize = int(os.path.getsize(localpath))
-        if localfilesize != remotefilesize:
-            resumedl = True
+        if os.path.isfile(localpath):
+            localfilesize = int(os.path.getsize(localpath))
+            if localfilesize != remotefilesize:
+                proceeddl = True
+            else:
+                proceeddl = False
+
+        if proceeddl:
+            with open(localpath, 'ab') as file:
+                with tqdm(total=remotefilesize, unit='B', unit_scale=True, desc=f'{str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}') as pbar:
+                    for data in filedownload.iter_content(chunk_size=CHUNKSIZE):
+                        file.write(data)
+                        pbar.update(len(data))
+
         else:
-            proceeddl = False
-
-    if proceeddl:
-        with open(localpath, 'ab') as file:
-            with tqdm(total=remotefilesize, unit='B', unit_scale=True, desc=f'{str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}') as pbar:
-                if resumedl:
-                    pbar.update(localfilesize)
-                    headers = REQHEADERS
-                    headers.update({'Range': f'bytes={localfilesize}-'})
-                    resp = requests.get(wantedfile['url'], headers=headers, stream=True)
-                    for data in resp.iter_content(chunk_size=CHUNKSIZE):
-                        file.write(data)
-                        pbar.update(len(data))
-                else:
-                    for data in resp.iter_content(chunk_size=CHUNKSIZE):
-                        file.write(data)
-                        pbar.update(len(data))
-
-    else:
-        logger(f'Already DLd {str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'green')
+            logger(f'Already DLd {str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'green')
+    except Exception as e:
+        logger(f'Received Exception during processing {wantedfile["name"]}: {str(e)}', 'red')
 
 #Download wanted files
 if not args.list:
-    with multiprocessing.Pool(args.threads) as pool:
+    with Pool(args.threads) as pool:
         pool.map(file_download, wantedfiles)
     logger('Downloading complete!', 'green', False)
 
