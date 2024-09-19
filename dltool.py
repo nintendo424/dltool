@@ -243,21 +243,27 @@ async def main():
 
             success = False
             while not success:
-                async with client.stream('GET', wantedfile['url']) as filestream:
+                try:
+                    async with client.stream('GET', wantedfile['url']) as filestream:
 
-                    if not filestream.is_error:
-                        remotefilesize = int(filestream.headers['content-length'])
+                        if not filestream.is_error:
+                            remotefilesize = int(filestream.headers['content-length'])
 
-                        if os.path.isfile(localpath) \
-                                and int(os.path.getsize(localpath)) != remotefilesize:
-                            async with aiofiles.open(localpath, 'wb') as file:
-                                async for chunk in filestream.aiter_bytes(args.chunksize):
-                                    await file.write(chunk)
-                        success = True
-                    else:
-                        logger(f'Received bad status for {wantedfile["name"]}: {filestream.status_code}. Reason: {filestream.reason_phrase}. Retrying after a pause...', 'red')
-                        sleep(5)
-
+                            if os.path.isfile(localpath) \
+                                    and int(os.path.getsize(localpath)) != remotefilesize:
+                                logger(f'Downloading {wantedfile["name"]}', 'green')
+                                async with aiofiles.open(localpath, 'wb') as file:
+                                    async for chunk in filestream.aiter_bytes(args.chunksize):
+                                        await file.write(chunk)
+                            # else:
+                                # logger(f'Already had {wantedfile["name"]} in cache!', 'green')
+                            success = True
+                        else:
+                            logger(f'Received bad status for {wantedfile["name"]}: {filestream.status_code}. Reason: {filestream.reason_phrase}. Retrying after a pause...', 'red')
+                            sleep(5)
+                except Exception as e:
+                    logger(f'Received an exception while downloading {wantedfile["name"]}: {str(e)}', 'red')
+                    sleep(5)
 
         #Download wanted files
         if not args.list:
