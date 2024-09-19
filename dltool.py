@@ -11,7 +11,7 @@ import textwrap
 import xml.etree.ElementTree as ET
 from multiprocessing import Pool, Value
 from bs4 import BeautifulSoup
-from progressbar import ProgressBar, Bar, ETA, FileTransferSpeed, Percentage, DataSize
+from progressbar import MultiBar, Bar, ETA, FileTransferSpeed, Percentage, DataSize
 
 #Define constants
 #Myrient HTTP-server addresses
@@ -242,12 +242,15 @@ if missingroms:
     logger(f'Amount of missing ROMs at server    : {len(missingroms)}', 'yellow')
 
 dlcounter = Value('i', 1)
+progressbars = MultiBar()
 
 def file_download(wantedfile):
+    global progressbars
+    global dlcounter
+
     resumedl = False
     proceeddl = True
 
-    global dlcounter
     counter = dlcounter.value
     with dlcounter.get_lock():
         dlcounter.value += 1
@@ -271,23 +274,25 @@ def file_download(wantedfile):
         file = open(localpath, 'ab')
 
         size, unit = scale1024(remotefilesize)
-        pbar = ProgressBar(widgets=['\033[96m', Percentage(), ' | ', DataSize(), f' / {round(size, 1)} {unit}', ' ', Bar(marker='#'), ' ', ETA(), ' | ', FileTransferSpeed(), '\033[00m'], max_value=remotefilesize, redirect_stdout=True)
-        pbar.start()
+        pbar = progressbars[counter]
+        pbar.widgets = ['\033[96m', Percentage(), ' | ', DataSize(), f' / {round(size, 1)} {unit}', ' ', Bar(marker='#'), ' ', ETA(), ' | ', FileTransferSpeed(), '\033[00m']
+        pbar.redirect_stdout = True
+        pbar.start(max_value=remotefilesize)
 
         if resumedl:
             logger(f'Resuming    {str(dlcounter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'cyan')
-            pbar += localfilesize
+            pbar.increment(localfilesize)
             headers = REQHEADERS
             headers.update({'Range': f'bytes={localfilesize}-'})
             resp = requests.get(wantedfile['url'], headers=headers, stream=True)
             for data in resp.iter_content(chunk_size=CHUNKSIZE):
                 file.write(data)
-                pbar += len(data)
+                pbar.increment(len(data))
         else:
             logger(f'Downloading {str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'cyan')
             for data in resp.iter_content(chunk_size=CHUNKSIZE):
                 file.write(data)
-                pbar += len(data)
+                pbar.increment(len(data))
 
         file.close()
         pbar.finish()
