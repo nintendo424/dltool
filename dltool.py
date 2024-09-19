@@ -11,7 +11,7 @@ import textwrap
 import xml.etree.ElementTree as ET
 from multiprocessing import Pool, Value
 from bs4 import BeautifulSoup
-from progressbar import MultiBar, Bar, ETA, FileTransferSpeed, Percentage, DataSize
+from tqdm import tqdm
 
 #Define constants
 #Myrient HTTP-server addresses
@@ -51,17 +51,6 @@ def inputter(str, color=None):
     else:
         val = input(f'{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | {str}')
     return val
-
-#Scale file size
-def scale1024(val):
-    prefixes=['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB']
-    if val <= 0:
-        power = 0
-    else:
-        power = min(int(math.log(val, 2) / 10), len(prefixes) - 1)
-    scaled = float(val) / (2 ** (10 * power))
-    unit = prefixes[power]
-    return scaled, unit
 
 #Exit handler function
 def exithandler(signum, frame):
@@ -242,10 +231,8 @@ if missingroms:
     logger(f'Amount of missing ROMs at server    : {len(missingroms)}', 'yellow')
 
 dlcounter = Value('i', 1)
-progressbars = MultiBar()
 
 def file_download(wantedfile):
-    global progressbars
     global dlcounter
 
     resumedl = False
@@ -261,7 +248,7 @@ def file_download(wantedfile):
         localpath = f'{args.out}\\{wantedfile["file"]}'
 
     resp = requests.get(wantedfile['url'], headers=REQHEADERS, stream=True)
-    remotefilesize = int(resp.headers.get('content-length'))
+    remotefilesize = int(resp.headers.get('content-length'), 0)
 
     if os.path.isfile(localpath):
         localfilesize = int(os.path.getsize(localpath))
@@ -271,33 +258,21 @@ def file_download(wantedfile):
             proceeddl = False
 
     if proceeddl:
-        file = open(localpath, 'ab')
+        with open(localpath, 'ab') as file:
+            with tqdm(total=remotefilesize, unit='B', unit_scale=True, desc=f'{str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}') as pbar:
+                if resumedl:
+                    pbar.update(localfilesize)
+                    headers = REQHEADERS
+                    headers.update({'Range': f'bytes={localfilesize}-'})
+                    resp = requests.get(wantedfile['url'], headers=headers, stream=True)
+                    for data in resp.iter_content(chunk_size=CHUNKSIZE):
+                        file.write(data)
+                        pbar.update(len(data))
+                else:
+                    for data in resp.iter_content(chunk_size=CHUNKSIZE):
+                        file.write(data)
+                        pbar.update(len(data))
 
-        size, unit = scale1024(remotefilesize)
-        pbar = progressbars[counter]
-        pbar.widgets = ['\033[96m', Percentage(), ' | ', DataSize(), f' / {round(size, 1)} {unit}', ' ', Bar(marker='#'), ' ', ETA(), ' | ', FileTransferSpeed(), '\033[00m']
-        pbar.redirect_stdout = True
-        pbar.start(max_value=remotefilesize)
-
-        if resumedl:
-            logger(f'Resuming    {str(dlcounter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'cyan')
-            pbar.increment(localfilesize)
-            headers = REQHEADERS
-            headers.update({'Range': f'bytes={localfilesize}-'})
-            resp = requests.get(wantedfile['url'], headers=headers, stream=True)
-            for data in resp.iter_content(chunk_size=CHUNKSIZE):
-                file.write(data)
-                pbar.increment(len(data))
-        else:
-            logger(f'Downloading {str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'cyan')
-            for data in resp.iter_content(chunk_size=CHUNKSIZE):
-                file.write(data)
-                pbar.increment(len(data))
-
-        file.close()
-        pbar.finish()
-        print('\033[1A', end='\x1b[2K')
-        logger(f'Downloaded  {str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'green', True)
     else:
         logger(f'Already DLd {str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'green')
 
