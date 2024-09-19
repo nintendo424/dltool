@@ -7,7 +7,6 @@ import datetime
 import platform
 import textwrap
 import xml.etree.ElementTree as et
-from functools import partial
 from time import sleep
 
 import httpx
@@ -261,8 +260,8 @@ async def main():
                         else:
                             logger(f'Received bad status for {wantedfile["name"]}: {filestream.status_code}. Reason: {filestream.reason_phrase}. Retrying after a pause...', 'red')
                             sleep(5)
-                except Exception as e:
-                    logger(f'Received an exception while downloading {wantedfile["name"]}: {str(e)}', 'red')
+                except httpx.ReadTimeout:
+                    logger(f'Received an read timeout while downloading {wantedfile["name"]}. Retrying after a pause...', 'red')
                     sleep(5)
 
         #Download wanted files
