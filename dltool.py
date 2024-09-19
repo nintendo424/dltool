@@ -246,27 +246,30 @@ def file_download(wantedfile):
         localpath = f'{args.out}\\{wantedfile["file"]}'
 
     content_length = None
-    while content_length is None:
-        filedownload = requests.get(wantedfile['url'], headers=REQHEADERS, stream=True, timeout=10)
-        content_length = filedownload.headers.get('content-length')
-    remotefilesize = int(content_length, 0)
+    try:
+        while content_length is None:
+            filedownload = requests.get(wantedfile['url'], headers=REQHEADERS, stream=True, timeout=10)
+            content_length = filedownload.headers.get('content-length')
+        remotefilesize = int(content_length, 0)
 
-    if os.path.isfile(localpath):
-        localfilesize = int(os.path.getsize(localpath))
-        if localfilesize != remotefilesize:
-            proceeddl = True
+        if os.path.isfile(localpath):
+            localfilesize = int(os.path.getsize(localpath))
+            if localfilesize != remotefilesize:
+                proceeddl = True
+            else:
+                proceeddl = False
+
+        if proceeddl:
+            with open(localpath, 'wb') as file:
+                with tqdm(total=remotefilesize, unit='B', unit_scale=True, desc=f'{str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}') as pbar:
+                    for data in filedownload.iter_content(chunk_size=args.chunksize):
+                        file.write(data)
+                        pbar.update(len(data))
+
         else:
-            proceeddl = False
-
-    if proceeddl:
-        with open(localpath, 'wb') as file:
-            with tqdm(total=remotefilesize, unit='B', unit_scale=True, desc=f'{str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}') as pbar:
-                for data in filedownload.iter_content(chunk_size=args.chunksize):
-                    file.write(data)
-                    pbar.update(len(data))
-
-    else:
-        logger(f'Already DLd {str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'green')
+            logger(f'Already DLd {str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'green')
+    except Exception as e:
+        logger(f'Received error while DLing {wantedfile["name"]}: {str(e)}', 'red')
 
 #Download wanted files
 if not args.list:
