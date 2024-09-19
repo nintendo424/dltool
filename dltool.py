@@ -24,8 +24,6 @@ CATALOGURLS = {
 DATPOSTFIXES = [
     ' (Retool)'
 ]
-#Chunk sizes to download
-CHUNKSIZE = 8192
 #Headers to use in HTTP-requests
 REQHEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
@@ -245,31 +243,28 @@ def file_download(wantedfile):
     elif platform.system() == 'Windows':
         localpath = f'{args.out}\\{wantedfile["file"]}'
 
-    try:
-        content_length = None
-        while content_length is None:
-            filedownload = requests.get(wantedfile['url'], headers=REQHEADERS, stream=True, timeout=10)
-            content_length = filedownload.headers.get('content-length')
-        remotefilesize = int(content_length, 0)
+    content_length = None
+    while content_length is None:
+        filedownload = requests.get(wantedfile['url'], headers=REQHEADERS, stream=True, timeout=10)
+        content_length = filedownload.headers.get('content-length')
+    remotefilesize = int(content_length, 0)
 
-        if os.path.isfile(localpath):
-            localfilesize = int(os.path.getsize(localpath))
-            if localfilesize != remotefilesize:
-                proceeddl = True
-            else:
-                proceeddl = False
-
-        if proceeddl:
-            with open(localpath, 'ab') as file:
-                with tqdm(total=remotefilesize, unit='B', unit_scale=True, desc=f'{str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}') as pbar:
-                    for data in filedownload.iter_content(chunk_size=CHUNKSIZE):
-                        file.write(data)
-                        pbar.update(len(data))
-
+    if os.path.isfile(localpath):
+        localfilesize = int(os.path.getsize(localpath))
+        if localfilesize != remotefilesize:
+            proceeddl = True
         else:
-            logger(f'Already DLd {str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'green')
-    except Exception as e:
-        logger(f'Received Exception during processing {wantedfile["name"]}: {str(e)}', 'red')
+            proceeddl = False
+
+    if proceeddl:
+        with open(localpath, 'ab') as file:
+            with tqdm(total=remotefilesize, unit='B', unit_scale=True, desc=f'{str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}') as pbar:
+                for data in filedownload.iter_content(chunk_size=None):
+                    file.write(data)
+                    pbar.update(len(data))
+
+    else:
+        logger(f'Already DLd {str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'green')
 
 #Download wanted files
 if not args.list:
