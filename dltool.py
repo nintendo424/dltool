@@ -276,13 +276,10 @@ def file_download(wantedfile):
     else:
         logger(f'Already DLd {str(counter).zfill(len(str(len(wantedfiles))))}/{len(wantedfiles)}: {wantedfile["name"]}', 'green')
 
-pool = multiprocessing.Pool(args.threads)
-
 #Download wanted files
 if not args.list:
-    pool.map(file_download, wantedfiles)
-    pool.close()
-    pool.join()
+    with multiprocessing.Pool(args.threads) as pool:
+        pool.map(file_download, wantedfiles)
     logger('Downloading complete!', 'green', False)
 
 #Output missing ROMs, if any
