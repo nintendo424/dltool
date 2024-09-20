@@ -2,3 +2,4 @@ beautifulsoup4>=4.12.3
 httpx[http2]>=0.27.2
 tqdm>=4.66.5
 aiofiles>=24.1.0
+tenacity>=9.0.0

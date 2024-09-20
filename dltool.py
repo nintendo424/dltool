@@ -1,4 +1,5 @@
 import asyncio
+import multiprocessing
 import os
 import re
 import signal
@@ -11,6 +12,7 @@ from time import sleep
 
 import httpx
 from bs4 import BeautifulSoup
+from tenacity import retry
 from tqdm.asyncio import tqdm
 import aiofiles
 
@@ -82,6 +84,7 @@ async def main():
     optionalargs.add_argument('-l', dest='list', action='store_true', help='List only ROMs that are not found in server (if any)')
     optionalargs.add_argument('-h', '--help', dest='help', action='help', help='Show this help message')
     optionalargs.add_argument('--chunk-size', dest='chunksize', default=8192, help='Chunk size in bytes', type=int)
+    optionalargs.add_argument('-t', '--task-count', dest='taskcount', default=multiprocessing.cpu_count(), help='Number of simultaneous tasks', type=int)
 
     args = parser.parse_args()
 
@@ -112,7 +115,8 @@ async def main():
     datxml = et.parse(args.inp)
     datroot = datxml.getroot()
 
-    async with httpx.AsyncClient(follow_redirects=True, http2=True, headers=REQHEADERS, timeout=httpx.Timeout(30)) as client:
+    transport = httpx.AsyncHTTPTransport(http2=True, retries=10)
+    async with httpx.AsyncClient(follow_redirects=True, http2=True, headers=REQHEADERS, timeout=httpx.Timeout(30), transport=transport) as client:
 
         #Loop through ROMs in input DAT-file
         for datchild in datroot:
@@ -234,40 +238,31 @@ async def main():
         if missingroms:
             logger(f'Amount of missing ROMs at server    : {len(missingroms)}', 'yellow')
 
-        downloadedroms = []
 
-        async def file_download(wantedfile):
-
+        @retry
+        async def file_download(sem, wantedfile):
+            logger('before semaphore', 'green')
             localpath = os.path.join(args.out, wantedfile["file"])
+            remotefilesize = int((await client.head(wantedfile['url'])).headers['content-length'])
 
-            success = False
-            while not success:
-                try:
-                    async with client.stream('GET', wantedfile['url']) as filestream:
+            async with sem:
+                logger('downloading file...', 'green')
+                localsize = os.path.getsize(localpath) if os.path.isfile(localpath) else 0
+                if localsize != remotefilesize:
+                    headers = REQHEADERS
+                    headers['Range'] = f'{localsize}-'
+                    async with client.stream('GET', wantedfile['url'], headers=headers) as filestream:
+                        async with aiofiles.open(localpath, 'wb') as file:
+                            async for chunk in filestream.aiter_bytes(args.chunksize):
+                                await file.write(chunk)
+                logger('finished downloading file...', 'green')
 
-                        if not filestream.is_error:
-                            remotefilesize = int(filestream.headers['content-length'])
 
-                            if not os.path.isfile(localpath) \
-                                    or int(os.path.getsize(localpath)) != remotefilesize:
-                                async with aiofiles.open(localpath, 'wb') as file:
-                                    async for chunk in filestream.aiter_bytes(args.chunksize):
-                                        await file.write(chunk)
-                            # else:
-                                # logger(f'Already had {wantedfile["name"]} in cache!', 'green')
-                            success = True
-                            downloadedroms.append(wantedfile["name"])
-                        else:
-                            logger(f'Received bad status for {wantedfile["name"]}: {filestream.status_code}. Reason: {filestream.reason_phrase}. Retrying after a pause...', 'red')
-                            sleep(5)
-                except:
-                    logger(f'Received an error while downloading {wantedfile["name"]}. Retrying after a pause...', 'red')
-                    sleep(5)
-
-        #Download wanted files
+    #Download wanted files
         if not args.list:
             try:
-                await tqdm.gather(*[file_download(file) for file in wantedfiles])
+                semaphore = asyncio.Semaphore(args.taskcount)
+                await tqdm.gather(*[file_download(semaphore, file) for file in wantedfiles])
                 logger('Downloading complete!', 'green', False)
             except asyncio.CancelledError:
                 logger('Download cancelled!', 'red')
@@ -279,18 +274,5 @@ async def main():
             logger(missingrom, 'yellow')
     else:
         logger('All ROMs in DAT found from server!', 'green')
-
-    # if (False):
-    #     logger(f'Outputting status files...')
-    #     async with aiofiles.open('statusFiles/downloaded', 'w') as file:
-    #         downloadedroms.sort()
-    #         await file.writelines(f'{line}\n' for line in downloadedroms)
-    #     async with aiofiles.open('statusFiles/wanted', 'w') as file:
-    #         wantedroms.sort()
-    #         await file.writelines(f'{line}\n' for line in wantedroms)
-    #     async with aiofiles.open('statusFiles/infolder', 'w') as file:
-    #         infolder = [f for f in os.listdir(args.out) if os.path.isfile(os.path.join(args.out, f))]
-    #         infolder.sort()
-    #         await file.writelines(f'{line}\n' for line in infolder)
 
 asyncio.run(main())
