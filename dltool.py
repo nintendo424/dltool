@@ -234,11 +234,11 @@ async def main():
         if missingroms:
             logger(f'Amount of missing ROMs at server    : {len(missingroms)}', 'yellow')
 
+        downloadedroms = []
+
         async def file_download(wantedfile):
 
-            localpath =  f'{args.out}/{wantedfile["file"]}'
-            if platform.system() == 'Windows':
-                localpath = f'{args.out}\\{wantedfile["file"]}'
+            localpath = os.path.join(args.out, wantedfile["file"])
 
             success = False
             while not success:
@@ -248,20 +248,20 @@ async def main():
                         if not filestream.is_error:
                             remotefilesize = int(filestream.headers['content-length'])
 
-                            if os.path.isfile(localpath) \
-                                    and int(os.path.getsize(localpath)) != remotefilesize:
-                                logger(f'Downloading {wantedfile["name"]}', 'green')
+                            if not os.path.isfile(localpath) \
+                                    or int(os.path.getsize(localpath)) != remotefilesize:
                                 async with aiofiles.open(localpath, 'wb') as file:
                                     async for chunk in filestream.aiter_bytes(args.chunksize):
                                         await file.write(chunk)
                             # else:
                                 # logger(f'Already had {wantedfile["name"]} in cache!', 'green')
                             success = True
+                            downloadedroms.append(wantedfile["name"])
                         else:
                             logger(f'Received bad status for {wantedfile["name"]}: {filestream.status_code}. Reason: {filestream.reason_phrase}. Retrying after a pause...', 'red')
                             sleep(5)
-                except httpx.ReadTimeout:
-                    logger(f'Received an read timeout while downloading {wantedfile["name"]}. Retrying after a pause...', 'red')
+                except:
+                    logger(f'Received an error while downloading {wantedfile["name"]}. Retrying after a pause...', 'red')
                     sleep(5)
 
         #Download wanted files
@@ -279,5 +279,18 @@ async def main():
             logger(missingrom, 'yellow')
     else:
         logger('All ROMs in DAT found from server!', 'green')
+
+    # if (False):
+    #     logger(f'Outputting status files...')
+    #     async with aiofiles.open('statusFiles/downloaded', 'w') as file:
+    #         downloadedroms.sort()
+    #         await file.writelines(f'{line}\n' for line in downloadedroms)
+    #     async with aiofiles.open('statusFiles/wanted', 'w') as file:
+    #         wantedroms.sort()
+    #         await file.writelines(f'{line}\n' for line in wantedroms)
+    #     async with aiofiles.open('statusFiles/infolder', 'w') as file:
+    #         infolder = [f for f in os.listdir(args.out) if os.path.isfile(os.path.join(args.out, f))]
+    #         infolder.sort()
+    #         await file.writelines(f'{line}\n' for line in infolder)
 
 asyncio.run(main())
