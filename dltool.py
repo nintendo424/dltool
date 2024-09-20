@@ -7,8 +7,7 @@ import argparse
 import datetime
 import platform
 import textwrap
-import xml.etree.ElementTree as et
-from time import sleep
+from xml.etree import ElementTree
 
 import httpx
 from bs4 import BeautifulSoup
@@ -16,26 +15,26 @@ from tenacity import retry
 from tqdm.asyncio import tqdm
 import aiofiles
 
-#Define constants
-#Myrient HTTP-server addresses
+# Define constants
+# Myrient HTTP-server addresses
 MYRIENTHTTPADDR = 'https://myrient.erista.me/files/'
-#Catalog URLs, to parse out the catalog in use from DAT
+# Catalog URLs, to parse out the catalog in use from DAT
 CATALOGURLS = {
     'https://www.no-intro.org': 'No-Intro',
     'http://redump.org/': 'Redump'
 }
-#Postfixes in DATs to strip away
+# Postfixes in DATs to strip away
 DATPOSTFIXES = [
     ' (Retool)'
 ]
-#Headers to use in HTTP-requests
+# Headers to use in HTTP-requests
 REQHEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'
 }
 
 async def main():
-    #Print output function
+    # Print output function
     def logger(message, color=None, rewrite=False):
         colors = {'red': '\033[91m', 'green': '\033[92m', 'yellow': '\033[93m', 'cyan': '\033[96m'}
         if rewrite:
@@ -45,7 +44,7 @@ async def main():
         else:
             print(f'{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | {message}')
 
-    #Input request function
+    # Input request function
     def inputter(message, color=None):
         colors = {'red': '\033[91m', 'green': '\033[92m', 'yellow': '\033[93m', 'cyan': '\033[96m'}
         if color:
@@ -54,14 +53,14 @@ async def main():
             val = input(f'{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | {message}')
         return val
 
-    #Exit handler function
+    # Exit handler function
     def exithandler(signum, frame):
         logger('Exiting script!', 'red')
         exit()
     signal.signal(signal.SIGINT, exithandler)
     signal.signal(signal.SIGTERM, exithandler)
 
-    #Generate argument parser
+    # Generate argument parser
     parser = argparse.ArgumentParser(
         add_help=False,
         formatter_class=argparse.RawTextHelpFormatter,
@@ -73,21 +72,21 @@ async def main():
             the matching files from Myrient.\033[00m
         '''))
 
-    #Add required arguments
+    # Add required arguments
     requiredargs = parser.add_argument_group('\033[91mRequired arguments\033[00m')
     requiredargs.add_argument('-i', dest='inp', metavar='nointro.dat', help='Input DAT-file containing wanted ROMs', required=True)
     requiredargs.add_argument('-o', dest='out', metavar='/data/roms', help='Output path for ROM files to be downloaded', required=True)
-    #Add optional arguments
+    # Add optional arguments
     optionalargs = parser.add_argument_group('\033[96mOptional arguments\033[00m')
     optionalargs.add_argument('-c', dest='catalog', action='store_true', help='Choose catalog manually, even if automatically found')
     optionalargs.add_argument('-s', dest='system', action='store_true', help='Choose system collection manually, even if automatically found')
     optionalargs.add_argument('-l', dest='list', action='store_true', help='List only ROMs that are not found in server (if any)')
     optionalargs.add_argument('-h', '--help', dest='help', action='help', help='Show this help message')
-    optionalargs.add_argument('-t', '--task-count', dest='taskcount', default=multiprocessing.cpu_count(), help='Number of simultaneous tasks', type=int)
-
+    optionalargs.add_argument('-t', '--task-count', dest='taskcount', action='store', default=multiprocessing.cpu_count(), help='Number of simultaneous tasks', type=int)
+    optionalargs.add_argument('--chunk-size', dest='chunksize', action='store', help='Chunk size in bytes', type=int)
     args = parser.parse_args()
 
-    #Init variables
+    # Init variables
     catalog = None
     collection = None
     wantedroms = []
@@ -97,7 +96,7 @@ async def main():
     availableroms = {}
     foundcollections = []
 
-    #Validate arguments
+    # Validate arguments
     if not os.path.isfile(args.inp):
         logger('Invalid input DAT-file!', 'red')
         exit()
@@ -109,17 +108,17 @@ async def main():
     elif platform.system() == 'Windows' and args.out[-1] == '\\':
         args.out = args.out[:-1]
 
-    #Open input DAT-file
+    # Open input DAT-file
     logger('Opening input DAT-file...', 'green')
-    datxml = et.parse(args.inp)
+    datxml = ElementTree.parse(args.inp)
     datroot = datxml.getroot()
 
     transport = httpx.AsyncHTTPTransport(http2=True, retries=10)
     async with httpx.AsyncClient(follow_redirects=True, http2=True, headers=REQHEADERS, timeout=httpx.Timeout(30), transport=transport) as client:
 
-        #Loop through ROMs in input DAT-file
+        # Loop through ROMs in input DAT-file
         for datchild in datroot:
-            #Print out system information
+            # Print out system information
             if datchild.tag == 'header':
                 system = datchild.find('name').text
                 for fix in DATPOSTFIXES:
@@ -130,7 +129,7 @@ async def main():
                     logger(f'Processing {catalog}: {system}...', 'green')
                 else:
                     logger(f'Processing {system}...', 'green')
-            #Add found ROMs to wanted list
+            # Add found ROMs to wanted list
             elif datchild.tag == 'game':
                 rom = datchild.find('rom')
                 filename = rom.attrib['name']
@@ -138,7 +137,7 @@ async def main():
                 if filename not in wantedroms:
                     wantedroms.append(filename)
 
-        #Get HTTP base and select wanted catalog
+        # Get HTTP base and select wanted catalog
         catalogurl = None
         resp = (await client.get(MYRIENTHTTPADDR)).text
         resp = BeautifulSoup(resp, 'html.parser')
@@ -170,7 +169,7 @@ async def main():
                 except ValueError:
                     logger('Invalid number!', 'red')
 
-        #Get catalog directory and select wanted collection
+        # Get catalog directory and select wanted collection
         collectionurl = None
         resp = (await client.get(f'{MYRIENTHTTPADDR}{catalogurl}')).text
         resp = BeautifulSoup(resp, 'html.parser')
@@ -213,7 +212,7 @@ async def main():
                 except ValueError:
                     logger('Invalid number!', 'red')
 
-        #Get collection directory contents and list contents to available ROMs
+        # Get collection directory contents and list contents to available ROMs
         resp = (await client.get(f'{MYRIENTHTTPADDR}{catalogurl}{collectionurl}')).text
         resp = BeautifulSoup(resp, 'html.parser')
         collectiondir = resp.find('table', id='list').tbody.find_all('tr')
@@ -224,14 +223,14 @@ async def main():
             url = f'{MYRIENTHTTPADDR}{catalogurl}{collectionurl}{cell["href"]}'
             availableroms[romname] = {'name': romname, 'file': filename, 'url': url}
 
-        #Compare wanted ROMs and contents of the collection, parsing out only wanted files
+        # Compare wanted ROMs and contents of the collection, parsing out only wanted files
         for wantedrom in wantedroms:
             if wantedrom in availableroms:
                 wantedfiles.append(availableroms[wantedrom])
             else:
                 missingroms.append(wantedrom)
 
-        #Print out information about wanted/found/missing ROMs
+        # Print out information about wanted/found/missing ROMs
         logger(f'Amount of wanted ROMs in DAT-file   : {len(wantedroms)}', 'green')
         logger(f'Amount of found ROMs at server      : {len(wantedfiles)}', 'green')
         if missingroms:
@@ -251,11 +250,11 @@ async def main():
                     async with client.stream('GET', wantedfile['url'], headers=headers) as filestream:
                         async with aiofiles.open(localpath, 'wb') as file:
                             with tqdm(desc=wantedfile['file'], total=remotefilesize, initial=localsize, unit='B', unit_scale=True, leave=False) as pbar:
-                                async for chunk in filestream.aiter_bytes():
+                                async for chunk in filestream.aiter_bytes(args.chunksize):
                                     pbar.update(len(chunk))
                                     await file.write(chunk)
 
-    #Download wanted files
+    # Download wanted files
         if not args.list:
             try:
                 semaphore = asyncio.Semaphore(args.taskcount)
@@ -264,7 +263,7 @@ async def main():
             except asyncio.CancelledError:
                 logger('Download cancelled!', 'red')
 
-    #Output missing ROMs, if any
+    # Output missing ROMs, if any
     if missingroms:
         logger(f'Following {len(missingroms)} ROMs in DAT not automatically found from server, grab these manually:', 'red')
         for missingrom in missingroms:
