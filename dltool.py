@@ -241,12 +241,10 @@ async def main():
 
         @retry
         async def file_download(sem, wantedfile):
-            logger('before semaphore', 'green')
             localpath = os.path.join(args.out, wantedfile["file"])
             remotefilesize = int((await client.head(wantedfile['url'])).headers['content-length'])
 
             async with sem:
-                logger('downloading file...', 'green')
                 localsize = os.path.getsize(localpath) if os.path.isfile(localpath) else 0
                 if localsize != remotefilesize:
                     headers = REQHEADERS
@@ -255,8 +253,6 @@ async def main():
                         async with aiofiles.open(localpath, 'wb') as file:
                             async for chunk in filestream.aiter_bytes(args.chunksize):
                                 await file.write(chunk)
-                logger('finished downloading file...', 'green')
-
 
     #Download wanted files
         if not args.list:
