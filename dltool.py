@@ -250,7 +250,7 @@ async def main():
                     raise Exception('Error getting filesize')
                 if localsize != remotefilesize:
                     headers = REQHEADERS
-                    headers['Range'] = f'{localsize}-'
+                    headers['Range'] = f'bytes={localsize}-'
                     async with client.stream('GET', wantedfile['url'], headers=headers) as filestream:
                         if not filestream.is_error:
                             async with aiofiles.open(localpath, 'wb' if localsize == 0 else 'ab') as file:
