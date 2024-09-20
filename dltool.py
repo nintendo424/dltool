@@ -251,14 +251,14 @@ async def main():
                     headers['Range'] = f'{localsize}-'
                     async with client.stream('GET', wantedfile['url'], headers=headers) as filestream:
                         async with aiofiles.open(localpath, 'wb') as file:
-                            async for chunk in filestream.aiter_bytes(args.chunksize):
+                            async for chunk in tqdm(desc=wantedfile['file'], iterable=filestream.aiter_bytes(args.chunksize), total=remotefilesize, initial=localsize, unit='B', unit_scale=True):
                                 await file.write(chunk)
 
     #Download wanted files
         if not args.list:
             try:
                 semaphore = asyncio.Semaphore(args.taskcount)
-                await tqdm.gather(*[file_download(semaphore, file) for file in wantedfiles])
+                await tqdm.gather(*[file_download(semaphore, file) for file in wantedfiles], desc='ROM Fetch Progress')
                 logger('Downloading complete!', 'green', False)
             except asyncio.CancelledError:
                 logger('Download cancelled!', 'red')
