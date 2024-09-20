@@ -83,7 +83,6 @@ async def main():
     optionalargs.add_argument('-s', dest='system', action='store_true', help='Choose system collection manually, even if automatically found')
     optionalargs.add_argument('-l', dest='list', action='store_true', help='List only ROMs that are not found in server (if any)')
     optionalargs.add_argument('-h', '--help', dest='help', action='help', help='Show this help message')
-    optionalargs.add_argument('--chunk-size', dest='chunksize', default=8192, help='Chunk size in bytes', type=int)
     optionalargs.add_argument('-t', '--task-count', dest='taskcount', default=multiprocessing.cpu_count(), help='Number of simultaneous tasks', type=int)
 
     args = parser.parse_args()
@@ -252,7 +251,7 @@ async def main():
                     async with client.stream('GET', wantedfile['url'], headers=headers) as filestream:
                         async with aiofiles.open(localpath, 'wb') as file:
                             with tqdm(desc=wantedfile['file'], total=remotefilesize, initial=localsize, unit='B', unit_scale=True, leave=False) as pbar:
-                                async for chunk in filestream.aiter_bytes(args.chunksize):
+                                async for chunk in filestream.aiter_bytes():
                                     pbar.update(len(chunk))
                                     await file.write(chunk)
 
