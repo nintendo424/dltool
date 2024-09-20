@@ -243,16 +243,23 @@ async def main():
             localsize = os.path.getsize(localpath) if os.path.isfile(localpath) else 0
 
             async with sem:
-                remotefilesize = int((await client.head(wantedfile['url'])).headers['content-length'])
+                filesizeresponse = await client.head(wantedfile['url'])
+                if not filesizeresponse.is_error:
+                    remotefilesize = int(filesizeresponse.headers['content-length'])
+                else:
+                    raise Exception('Error getting filesize')
                 if localsize != remotefilesize:
                     headers = REQHEADERS
                     headers['Range'] = f'{localsize}-'
                     async with client.stream('GET', wantedfile['url'], headers=headers) as filestream:
-                        async with aiofiles.open(localpath, 'wb') as file:
-                            with tqdm(desc=wantedfile['file'], total=remotefilesize, initial=localsize, unit='B', unit_scale=True, leave=False) as pbar:
-                                async for chunk in filestream.aiter_bytes(args.chunksize):
-                                    pbar.update(len(chunk))
-                                    await file.write(chunk)
+                        if not filestream.is_error:
+                            async with aiofiles.open(localpath, 'wb') as file:
+                                with tqdm(desc=wantedfile['file'], total=remotefilesize, initial=localsize, unit='B', unit_scale=True, leave=False) as pbar:
+                                    async for chunk in filestream.aiter_bytes(args.chunksize):
+                                        pbar.update(len(chunk))
+                                        await file.write(chunk)
+                        else:
+                            raise Exception('Error downloading file')
 
     # Download wanted files
         if not args.list:
