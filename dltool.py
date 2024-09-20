@@ -253,11 +253,15 @@ async def main():
                     headers['Range'] = f'{localsize}-'
                     async with client.stream('GET', wantedfile['url'], headers=headers) as filestream:
                         if not filestream.is_error:
-                            async with aiofiles.open(localpath, 'wb') as file:
+                            async with aiofiles.open(localpath, 'wb' if localsize == 0 else 'ab') as file:
                                 with tqdm(desc=wantedfile['file'], total=remotefilesize, initial=localsize, unit='B', unit_scale=True, leave=False) as pbar:
                                     async for chunk in filestream.aiter_bytes(args.chunksize):
                                         pbar.update(len(chunk))
                                         await file.write(chunk)
+
+                            if os.path.getsize(localpath) != remotefilesize:
+                                os.remove(localpath)
+                                raise Exception('Wrong file size! Redownloading')
                         else:
                             raise Exception('Error downloading file')
 
