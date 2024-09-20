@@ -242,17 +242,19 @@ async def main():
         @retry
         async def file_download(sem, wantedfile):
             localpath = os.path.join(args.out, wantedfile["file"])
-            remotefilesize = int((await client.head(wantedfile['url'])).headers['content-length'])
+            localsize = os.path.getsize(localpath) if os.path.isfile(localpath) else 0
 
             async with sem:
-                localsize = os.path.getsize(localpath) if os.path.isfile(localpath) else 0
+                remotefilesize = int((await client.head(wantedfile['url'])).headers['content-length'])
                 if localsize != remotefilesize:
                     headers = REQHEADERS
                     headers['Range'] = f'{localsize}-'
                     async with client.stream('GET', wantedfile['url'], headers=headers) as filestream:
                         async with aiofiles.open(localpath, 'wb') as file:
-                            async for chunk in tqdm(desc=wantedfile['file'], iterable=filestream.aiter_bytes(args.chunksize), total=remotefilesize, initial=localsize, unit='B', unit_scale=True):
-                                await file.write(chunk)
+                            with tqdm(desc=wantedfile['file'], total=remotefilesize, initial=localsize, unit='B', unit_scale=True, leave=False) as pbar:
+                                async for chunk in filestream.aiter_bytes(args.chunksize):
+                                    pbar.update(len(chunk))
+                                    await file.write(chunk)
 
     #Download wanted files
         if not args.list:

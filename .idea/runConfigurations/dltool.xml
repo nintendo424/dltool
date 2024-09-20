@@ -15,7 +15,7 @@
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/dltool.py" />
-    <option name="PARAMETERS" value="-i &quot;inputDats/Nintendo - Game Boy Color (20240915-014757) (Retool 2024-09-18 04-07-51) (543) (-n) [-bdfpPu].dat&quot; -o outputFiles" />
+    <option name="PARAMETERS" value="-i &quot;inputDats/Sony - PlayStation (2024-09-16 16-12-56) (Retool 2024-09-18 04-08-47) (2,069) (-n) [-bdfpPu].dat&quot; -o outputFiles -t 2" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />
