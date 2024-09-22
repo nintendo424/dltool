@@ -48,7 +48,7 @@ async def main():
         formatter_class=argparse.RawTextHelpFormatter,
         description=textwrap.dedent('''\
             \033[92mTool to automatically download ROMs of a DAT-file from Myrient.
-            
+
             Generate a DAT-file with the tool of your choice to include ROMs that you
             want from a No-Intro/Redump/etc catalog, then use this tool to download
             the matching files from Myrient.\033[00m
@@ -285,14 +285,13 @@ async def main():
                         else:
                             logger.error(f'Error downloading {wanted_file['name']}, will redownload')
                             raise Exception()
-                    logger.debug(f'Successfully downloaded {wanted_file['name']}')
-                    downloaded_roms.append(wanted_file['name'])
                 elif local_size > remote_file_size:
                     logger.error(f'{wanted_file['file']} local size larger than remote, need to redownload...')
                     os.remove(local_path)
                     raise Exception()
-                else:
-                    logger.debug(f'Already have {wanted_file['name']}, do not need to download')
+
+                logger.debug(f'Successfully downloaded {wanted_file['name']}')
+                downloaded_roms.append(wanted_file['name'])
 
         # Download wanted files
         if not args.list:
@@ -309,14 +308,13 @@ async def main():
         for missing_rom in missing_roms:
             logger.info(missing_rom)
     else:
-        logger.info('All ROMs in DAT found from server!')
+        logger.info('All ROMs in DAT found from bserver!')
 
     not_downloaded = [rom for rom in wanted_roms if rom not in downloaded_roms]
     if len(not_downloaded) > 0:
         logger.error(f'Couldn\'t download some roms, retry: ')
         for rom in not_downloaded:
             logger.error(rom)
-    
 
 if __name__ == '__main__':
     asyncio.run(main())
