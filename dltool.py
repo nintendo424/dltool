@@ -11,7 +11,7 @@ from xml.etree import ElementTree
 
 import httpx
 from bs4 import BeautifulSoup
-from tenacity import retry, after_log, before_log
+from tenacity import retry, wait_exponential, before_sleep_log
 from tqdm.asyncio import tqdm
 import aiofiles
 
@@ -71,7 +71,7 @@ async def main():
     optionalargs.add_argument('-f', '--filter', dest='filter', action='store', help='Filter ROMs to download', default=None, type=str)
     optionalargs.add_argument('--log', default='warning',
         choices=['debug', 'info', 'warning', 'error'],
-        help="logging level (defaults to 'warning')")
+        help='logging level (defaults to \'warning\')')
 
     args = parser.parse_args()
 
@@ -80,14 +80,14 @@ async def main():
     console_handler = logging.StreamHandler()
     console_handler.setLevel(getattr(logging, args.log.upper()))
     formatter = logging.Formatter(
-        "{asctime} - {levelname} - {message}",
-        style="{",
-        datefmt="%Y-%m-%d %H:%M"
+        '{asctime} - {levelname} - {message}',
+        style='{',
+        datefmt='%Y-%m-%d %H:%M'
     )
     console_handler.setFormatter(formatter)
 
     if args.enabledebug:
-        file_handler = logging.FileHandler("debug.log", mode="w")
+        file_handler = logging.FileHandler('debug.log', mode='w')
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
@@ -161,7 +161,7 @@ async def main():
             catalogtemp = {}
             for directory in maindir[1:]:
                 cell = directory.find('td')
-                logger.info(f'{str(dirnbr).ljust(2)}: {cell.a["title"]}')
+                logger.info(f'{str(dirnbr).ljust(2)}: {cell.a['title']}')
                 catalogtemp[dirnbr] = {'name': cell.a['title'], 'url': cell.a['href']}
                 dirnbr += 1
             while True:
@@ -194,13 +194,13 @@ async def main():
             dirnbr = 1
             if len(foundcollections) > 1 and not args.system:
                 for foundcollection in foundcollections:
-                    logger.info(f'{str(dirnbr).ljust(2)}: {foundcollection["name"]}')
+                    logger.info(f'{str(dirnbr).ljust(2)}: {foundcollection['name']}')
                     dirnbr += 1
             else:
                 collectiontemp = {}
                 for directory in contentdir[1:]:
                     cell = directory.find('td')
-                    logger.info(f'{str(dirnbr).ljust(2)}: {cell.a["title"]}')
+                    logger.info(f'{str(dirnbr).ljust(2)}: {cell.a['title']}')
                     collectiontemp[dirnbr] = {'name': cell.a['title'], 'url': cell.a['href']}
                     dirnbr += 1
             while True:
@@ -228,7 +228,7 @@ async def main():
             cell = rom.find('a')
             filename = cell['title']
             romname = re.sub(r'\.[(a-zA-Z0-9)]{1,3}\Z', '', filename)
-            url = f'{MYRIENTHTTPADDR}{catalogurl}{collectionurl}{cell["href"]}'
+            url = f'{MYRIENTHTTPADDR}{catalogurl}{collectionurl}{cell['href']}'
             availableroms[romname] = {'name': romname, 'file': filename, 'url': url}
 
         if args.filter:
@@ -247,12 +247,15 @@ async def main():
         if missingroms:
             logger.info(f'Amount of missing ROMs at server    : {len(missingroms)}')
 
-        @retry
+        @retry(
+            wait=wait_exponential(multiplier=1, min=1, max=8),
+            before_sleep=before_sleep_log(logger, logging.WARNING)
+        )
         async def file_download(sem, wantedfile):
-            localpath = os.path.join(args.out, wantedfile["file"])
+            localpath = os.path.join(args.out, wantedfile['file'])
             localsize = os.path.getsize(localpath) if os.path.isfile(localpath) else 0
 
-            logger.debug(f'Preparing to fetch {wantedfile["name"]}')
+            logger.debug(f'Preparing to fetch {wantedfile['name']}')
 
             async with sem:
                 filesizeresponse = await client.head(wantedfile['url'])
@@ -262,13 +265,13 @@ async def main():
                     logger.debug('Error getting filesize')
                     raise Exception()
 
-                logger.debug(f'{wantedfile["name"]} sizes: local: {localsize}, remote: {remotefilesize}')
-                if localsize != remotefilesize:
+                logger.debug(f'{wantedfile['name']} sizes: local: {localsize}, remote: {remotefilesize}')
+                if localsize < remotefilesize:
                     headers = REQHEADERS
                     headers['Range'] = f'bytes={localsize}-'
                     async with client.stream('GET', wantedfile['url'], headers=headers) as filestream:
                         if not filestream.is_error:
-                            logger.debug(f'Need to download {wantedfile["name"]}, {'downloading' if localsize == 0 else 'resuming'}')
+                            logger.debug(f'Need to download {wantedfile['name']}, {'downloading' if localsize == 0 else 'resuming'}')
 
                             async with aiofiles.open(localpath, 'wb' if localsize == 0 else 'ab') as file:
                                 with tqdm(desc=wantedfile['file'], total=remotefilesize, initial=localsize, unit='B', unit_scale=True, leave=False) as pbar:
@@ -278,14 +281,18 @@ async def main():
 
                             if os.path.getsize(localpath) != remotefilesize:
                                 os.remove(localpath)
-                                logger.error(f'Wrong file size after downloading {wantedfile["name"]}, will redownload')
+                                logger.error(f'Wrong file size after downloading {wantedfile['name']}, will redownload')
                                 raise Exception()
-                            logger.debug(f'Successfully downloaded {wantedfile["name"]}')
+                            logger.debug(f'Successfully downloaded {wantedfile['name']}')
                         else:
-                            logger.error(f'Error downloading {wantedfile["name"]}, will redownload')
+                            logger.error(f'Error downloading {wantedfile['name']}, will redownload')
                             raise Exception()
+                elif localsize > remotefilesize:
+                    logger.error(f'{wantedfile['file']} local size larger than remote, need to redownload...')
+                    os.remove(localpath)
+                    raise Exception()
                 else:
-                    logger.debug(f'Already have {wantedfile["name"]}, do not need to download')
+                    logger.debug(f'Already have {wantedfile['name']}, do not need to download')
 
         # Download wanted files
         if not args.list:
