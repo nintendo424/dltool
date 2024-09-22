@@ -291,7 +291,7 @@ async def main():
                     raise Exception()
 
                 logger.debug(f'Successfully downloaded {wanted_file['name']}')
-                downloaded_roms.append(wanted_file['name'])
+                downloaded_roms.append(wanted_file)
 
         # Download wanted files
         if not args.list:
@@ -310,11 +310,11 @@ async def main():
     else:
         logger.info('All ROMs in DAT found from bserver!')
 
-    not_downloaded = [rom for rom in wanted_roms if rom not in downloaded_roms]
+    not_downloaded = [rom for rom in wanted_files if rom not in downloaded_roms]
     if len(not_downloaded) > 0:
-        logger.error(f'Couldn\'t download some roms, retry: ')
+        logger.error(f'Couldn\'t download some roms, retry:')
         for rom in not_downloaded:
-            logger.error(rom)
+            logger.error(rom['name'])
 
 if __name__ == '__main__':
     asyncio.run(main())
