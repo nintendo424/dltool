@@ -1,17 +1,17 @@
 import asyncio
+import logging
 import multiprocessing
 import os
 import re
 import signal
 import argparse
-import datetime
 import platform
 import textwrap
 from xml.etree import ElementTree
 
 import httpx
 from bs4 import BeautifulSoup
-from tenacity import retry
+from tenacity import retry, after_log, before_log
 from tqdm.asyncio import tqdm
 import aiofiles
 
@@ -34,28 +34,10 @@ REQHEADERS = {
 }
 
 async def main():
-    # Print output function
-    def logger(message, color=None, rewrite=False):
-        colors = {'red': '\033[91m', 'green': '\033[92m', 'yellow': '\033[93m', 'cyan': '\033[96m'}
-        if rewrite:
-            print('\033[1A', end='\x1b[2K')
-        if color:
-            print(f'{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | {colors[color]}{message}\033[00m')
-        else:
-            print(f'{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | {message}')
-
-    # Input request function
-    def inputter(message, color=None):
-        colors = {'red': '\033[91m', 'green': '\033[92m', 'yellow': '\033[93m', 'cyan': '\033[96m'}
-        if color:
-            val = input(f'{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | {colors[color]}{message}\033[00m')
-        else:
-            val = input(f'{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | {message}')
-        return val
 
     # Exit handler function
     def exithandler(signum, frame):
-        logger('Exiting script!', 'red')
+        logger.info('Exiting script!')
         exit()
     signal.signal(signal.SIGINT, exithandler)
     signal.signal(signal.SIGTERM, exithandler)
@@ -76,15 +58,41 @@ async def main():
     requiredargs = parser.add_argument_group('\033[91mRequired arguments\033[00m')
     requiredargs.add_argument('-i', dest='inp', metavar='nointro.dat', help='Input DAT-file containing wanted ROMs', required=True)
     requiredargs.add_argument('-o', dest='out', metavar='/data/roms', help='Output path for ROM files to be downloaded', required=True)
+
     # Add optional arguments
     optionalargs = parser.add_argument_group('\033[96mOptional arguments\033[00m')
     optionalargs.add_argument('-c', dest='catalog', action='store_true', help='Choose catalog manually, even if automatically found')
     optionalargs.add_argument('-s', dest='system', action='store_true', help='Choose system collection manually, even if automatically found')
     optionalargs.add_argument('-l', dest='list', action='store_true', help='List only ROMs that are not found in server (if any)')
+    optionalargs.add_argument('-d', dest='enabledebug', action='store_true', help='Enable debug logs to a file')
     optionalargs.add_argument('-h', '--help', dest='help', action='help', help='Show this help message')
     optionalargs.add_argument('-t', '--task-count', dest='taskcount', action='store', default=multiprocessing.cpu_count(), help='Number of simultaneous tasks', type=int)
     optionalargs.add_argument('--chunk-size', dest='chunksize', action='store', help='Chunk size in bytes', type=int)
+    optionalargs.add_argument('-f', '--filter', dest='filter', action='store', help='Filter ROMs to download', default=None, type=str)
+    optionalargs.add_argument('--log', default='warning',
+        choices=['debug', 'info', 'warning', 'error'],
+        help="logging level (defaults to 'warning')")
+
     args = parser.parse_args()
+
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(getattr(logging, args.log.upper()))
+    formatter = logging.Formatter(
+        "{asctime} - {levelname} - {message}",
+        style="{",
+        datefmt="%Y-%m-%d %H:%M"
+    )
+    console_handler.setFormatter(formatter)
+
+    if args.enabledebug:
+        file_handler = logging.FileHandler("debug.log", mode="w")
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+    logger.addHandler(console_handler)
 
     # Init variables
     catalog = None
@@ -98,10 +106,10 @@ async def main():
 
     # Validate arguments
     if not os.path.isfile(args.inp):
-        logger('Invalid input DAT-file!', 'red')
+        logger.info('Invalid input DAT-file!')
         exit()
     if not os.path.isdir(args.out):
-        logger('Invalid output ROM path!', 'red')
+        logger.info('Invalid output ROM path!')
         exit()
     if platform.system() == 'Linux' and args.out[-1] == '/':
         args.out = args.out[:-1]
@@ -109,7 +117,7 @@ async def main():
         args.out = args.out[:-1]
 
     # Open input DAT-file
-    logger('Opening input DAT-file...', 'green')
+    logger.info('Opening input DAT-file...')
     datxml = ElementTree.parse(args.inp)
     datroot = datxml.getroot()
 
@@ -126,9 +134,9 @@ async def main():
                 catalogurl = datchild.find('url').text
                 if catalogurl in CATALOGURLS:
                     catalog = CATALOGURLS[catalogurl]
-                    logger(f'Processing {catalog}: {system}...', 'green')
+                    logger.info(f'Processing {catalog}: {system}...')
                 else:
-                    logger(f'Processing {system}...', 'green')
+                    logger.info(f'Processing {system}...')
             # Add found ROMs to wanted list
             elif datchild.tag == 'game':
                 rom = datchild.find('rom')
@@ -148,16 +156,16 @@ async def main():
                 catalogurl = cell.a['href']
 
         if not catalogurl or args.catalog:
-            logger('Catalog for DAT not automatically found, please select from the following:', 'yellow')
+            logger.info('Catalog for DAT not automatically found, please select from the following:')
             dirnbr = 1
             catalogtemp = {}
             for directory in maindir[1:]:
                 cell = directory.find('td')
-                logger(f'{str(dirnbr).ljust(2)}: {cell.a["title"]}', 'yellow')
+                logger.info(f'{str(dirnbr).ljust(2)}: {cell.a["title"]}')
                 catalogtemp[dirnbr] = {'name': cell.a['title'], 'url': cell.a['href']}
                 dirnbr += 1
             while True:
-                sel = inputter('Input selected catalog number: ', 'cyan')
+                sel = input('Input selected catalog number: ')
                 try:
                     sel = int(sel)
                     if 0 < sel < dirnbr:
@@ -165,9 +173,9 @@ async def main():
                         catalogurl = catalogtemp[sel]['url']
                         break
                     else:
-                        logger('Input number out of range!', 'red')
+                        logger.info('Input number out of range!')
                 except ValueError:
-                    logger('Invalid number!', 'red')
+                    logger.info('Invalid number!')
 
         # Get catalog directory and select wanted collection
         collectionurl = None
@@ -182,21 +190,21 @@ async def main():
             collection = foundcollections[0]['name']
             collectionurl = foundcollections[0]['url']
         if not collection or args.system:
-            logger('Collection for DAT not automatically found, please select from the following:', 'yellow')
+            logger.info('Collection for DAT not automatically found, please select from the following:')
             dirnbr = 1
             if len(foundcollections) > 1 and not args.system:
                 for foundcollection in foundcollections:
-                    logger(f'{str(dirnbr).ljust(2)}: {foundcollection["name"]}', 'yellow')
+                    logger.info(f'{str(dirnbr).ljust(2)}: {foundcollection["name"]}')
                     dirnbr += 1
             else:
                 collectiontemp = {}
                 for directory in contentdir[1:]:
                     cell = directory.find('td')
-                    logger(f'{str(dirnbr).ljust(2)}: {cell.a["title"]}', 'yellow')
+                    logger.info(f'{str(dirnbr).ljust(2)}: {cell.a["title"]}')
                     collectiontemp[dirnbr] = {'name': cell.a['title'], 'url': cell.a['href']}
                     dirnbr += 1
             while True:
-                sel = inputter('Input selected collection number: ', 'cyan')
+                sel = input('Input selected collection number: ')
                 try:
                     sel = int(sel)
                     if 0 < sel < dirnbr:
@@ -208,9 +216,9 @@ async def main():
                             collectionurl = collectiontemp[sel]['url']
                         break
                     else:
-                        logger('Input number out of range!', 'red')
+                        logger.info('Input number out of range!')
                 except ValueError:
-                    logger('Invalid number!', 'red')
+                    logger.info('Invalid number!')
 
         # Get collection directory contents and list contents to available ROMs
         resp = (await client.get(f'{MYRIENTHTTPADDR}{catalogurl}{collectionurl}')).text
@@ -223,6 +231,9 @@ async def main():
             url = f'{MYRIENTHTTPADDR}{catalogurl}{collectionurl}{cell["href"]}'
             availableroms[romname] = {'name': romname, 'file': filename, 'url': url}
 
+        if args.filter:
+            wantedroms = [rom for rom in wantedroms if args.filter.lower() in rom.lower()]
+
         # Compare wanted ROMs and contents of the collection, parsing out only wanted files
         for wantedrom in wantedroms:
             if wantedrom in availableroms:
@@ -231,28 +242,34 @@ async def main():
                 missingroms.append(wantedrom)
 
         # Print out information about wanted/found/missing ROMs
-        logger(f'Amount of wanted ROMs in DAT-file   : {len(wantedroms)}', 'green')
-        logger(f'Amount of found ROMs at server      : {len(wantedfiles)}', 'green')
+        logger.info(f'Amount of wanted ROMs in DAT-file   : {len(wantedroms)}')
+        logger.info(f'Amount of found ROMs at server      : {len(wantedfiles)}')
         if missingroms:
-            logger(f'Amount of missing ROMs at server    : {len(missingroms)}', 'yellow')
-
+            logger.info(f'Amount of missing ROMs at server    : {len(missingroms)}')
 
         @retry
         async def file_download(sem, wantedfile):
             localpath = os.path.join(args.out, wantedfile["file"])
             localsize = os.path.getsize(localpath) if os.path.isfile(localpath) else 0
 
+            logger.debug(f'Preparing to fetch {wantedfile["name"]}')
+
             async with sem:
                 filesizeresponse = await client.head(wantedfile['url'])
                 if not filesizeresponse.is_error:
                     remotefilesize = int(filesizeresponse.headers['content-length'])
                 else:
-                    raise Exception('Error getting filesize')
+                    logger.debug('Error getting filesize')
+                    raise Exception()
+
+                logger.debug(f'{wantedfile["name"]} sizes: local: {localsize}, remote: {remotefilesize}')
                 if localsize != remotefilesize:
                     headers = REQHEADERS
                     headers['Range'] = f'bytes={localsize}-'
                     async with client.stream('GET', wantedfile['url'], headers=headers) as filestream:
                         if not filestream.is_error:
+                            logger.debug(f'Need to download {wantedfile["name"]}, {'downloading' if localsize == 0 else 'resuming'}')
+
                             async with aiofiles.open(localpath, 'wb' if localsize == 0 else 'ab') as file:
                                 with tqdm(desc=wantedfile['file'], total=remotefilesize, initial=localsize, unit='B', unit_scale=True, leave=False) as pbar:
                                     async for chunk in filestream.aiter_bytes(args.chunksize):
@@ -261,25 +278,30 @@ async def main():
 
                             if os.path.getsize(localpath) != remotefilesize:
                                 os.remove(localpath)
-                                raise Exception('Wrong file size! Redownloading')
+                                logger.error(f'Wrong file size after downloading {wantedfile["name"]}, will redownload')
+                                raise Exception()
+                            logger.debug(f'Successfully downloaded {wantedfile["name"]}')
                         else:
-                            raise Exception('Error downloading file')
+                            logger.error(f'Error downloading {wantedfile["name"]}, will redownload')
+                            raise Exception()
+                else:
+                    logger.debug(f'Already have {wantedfile["name"]}, do not need to download')
 
-    # Download wanted files
+        # Download wanted files
         if not args.list:
             try:
                 semaphore = asyncio.Semaphore(args.taskcount)
                 await tqdm.gather(*[file_download(semaphore, file) for file in wantedfiles], desc='ROM Fetch Progress')
-                logger('Downloading complete!', 'green', False)
+                logger.info('Downloading complete!')
             except asyncio.CancelledError:
-                logger('Download cancelled!', 'red')
+                logger.error('Download cancelled!')
 
     # Output missing ROMs, if any
     if missingroms:
-        logger(f'Following {len(missingroms)} ROMs in DAT not automatically found from server, grab these manually:', 'red')
+        logger.info(f'Following {len(missingroms)} ROMs in DAT not automatically found from server, grab these manually:')
         for missingrom in missingroms:
-            logger(missingrom, 'yellow')
+            logger.info(missingrom)
     else:
-        logger('All ROMs in DAT found from server!', 'green')
+        logger.info('All ROMs in DAT found from server!')
 
 asyncio.run(main())
