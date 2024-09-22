@@ -85,14 +85,13 @@ async def main():
         datefmt='%Y-%m-%d %H:%M'
     )
     console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
 
     if args.enabledebug:
         file_handler = logging.FileHandler('debug.log', mode='w')
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
-
-    logger.addHandler(console_handler)
 
     # Init variables
     catalog = None
